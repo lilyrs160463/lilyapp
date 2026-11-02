@@ -2033,13 +2033,18 @@ function EmailDialog({ type, doc, business, docEl, total: totalProp, paid: paidP
     setError('');
     try {
       setStatus('building');
-      const filename = isInvoice ? `חשבון-${doc.number}.pdf` : `קבלה-${doc.number}.pdf`;
+      // ASCII-safe filename to avoid any Hebrew-filename issues on the backend
+      const filename = isInvoice ? `invoice-${doc.number}.pdf` : `receipt-${doc.number}.pdf`;
       const total = totalProp || (isInvoice ? (doc.lines || []).reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.price) || 0), 0) : 0);
       const paid = paidProp || 0;
       const remain = remainProp !== undefined ? remainProp : (total - paid);
       const pdfHtml = buildDocumentHtml(type, doc, business, total, paid, remain);
+      if (!pdfHtml || pdfHtml.length < 100) {
+        throw new Error('לא ניתן ליצור את ה-PDF — buildDocumentHtml החזיר תוכן ריק');
+      }
+      console.log('Sending email with pdfHtml length:', pdfHtml.length);
       setStatus('sending');
-      await sendEmailViaBackend({
+      const result = await sendEmailViaBackend({
         to: to.trim(),
         subject: subject.trim(),
         body: body,
@@ -2047,6 +2052,12 @@ function EmailDialog({ type, doc, business, docEl, total: totalProp, paid: paidP
         pdfName: filename,
         fromName: biz.name,
       });
+      // Backend reports whether the attachment was created
+      if (result && result.hasAttachment === false) {
+        setStatus('error');
+        setError('ההודעה נשלחה אבל הקובץ המצורף לא נוצר: ' + (result.attachmentError || 'סיבה לא ידועה'));
+        return;
+      }
       setStatus('sent');
       setTimeout(onClose, 1500);
     } catch (err) {
